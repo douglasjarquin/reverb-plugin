@@ -1,0 +1,16 @@
+{
+  "name": "reverb",
+  "version": "0.2.0",
+  "description": "Search public Reverb marketplace listings and manage your seller listings with a personal access token.",
+  "variables": {
+    "type": "object",
+    "properties": {
+      "REVERB_TOKEN": {
+        "type": "string",
+        "title": "Reverb personal access token",
+        "description": "Personal Access Token from Reverb Profile → API & Integrations. Scopes: public, read_listings, write_listings."
+      }
+    },
+    "required": ["REVERB_TOKEN"]
+  }
+}
