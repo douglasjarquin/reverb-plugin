@@ -671,10 +671,17 @@ async function callTool(name, args) {
   }
 }
 
+let outboundFraming = "jsonl";
+
 function send(message) {
-  const json = Buffer.from(JSON.stringify(message), "utf8");
-  process.stdout.write("Content-Length: " + json.length + "\r\n\r\n");
-  process.stdout.write(json);
+  const json = JSON.stringify(message);
+  if (outboundFraming === "content-length") {
+    const body = Buffer.from(json, "utf8");
+    process.stdout.write("Content-Length: " + body.length + "\r\n\r\n");
+    process.stdout.write(body);
+    return;
+  }
+  process.stdout.write(json + "\n");
 }
 
 function toolResult(id, value, isError) {
@@ -688,7 +695,7 @@ function toolResult(id, value, isError) {
   });
 }
 
-const SUPPORTED_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18"];
+const SUPPORTED_PROTOCOLS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
 
 function handle(message) {
   if (!message || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
@@ -752,6 +759,7 @@ function tryTake() {
   if (i > 0) buffer = buffer.slice(i);
   const prefix = buffer.slice(0, 20).toString("utf8").toLowerCase();
   if (prefix.startsWith("content-length:")) {
+    outboundFraming = "content-length";
     const sep = buffer.indexOf("\r\n\r\n");
     if (sep < 0) return null;
     const header = buffer.slice(0, sep).toString("utf8");

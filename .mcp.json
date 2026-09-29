@@ -2,11 +2,11 @@
   "mcpServers": {
     "reverb": {
       "name": "reverb",
-      "command": "npx",
+      "command": "node",
       "args": [
-        "-y",
-        "github:douglasjarquin/reverb-plugin"
+        "${CURSOR_PLUGIN_ROOT}/server.js"
       ],
+      "cwd": "${CURSOR_PLUGIN_ROOT}",
       "env": {
         "REVERB_TOKEN": "${REVERB_TOKEN}"
       }
