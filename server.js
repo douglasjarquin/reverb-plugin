@@ -436,6 +436,128 @@ function pick(obj, keys) {
   return Object.keys(out).length ? out : undefined;
 }
 
+const PLAIN_DESCRIPTION_KEYS = ["plain_text_description", "description_plain", "plain_description"];
+const HTML_DESCRIPTION_KEYS = ["description_html", "html_description"];
+
+function firstString(obj, keys) {
+  if (!obj || typeof obj !== "object") return undefined;
+  for (const key of keys) {
+    if (typeof obj[key] === "string") return obj[key];
+  }
+  return undefined;
+}
+
+function decodeBasicEntities(value) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
+
+function normalizedText(value) {
+  return decodeBasicEntities(value).replace(/\s+/g, " ").trim();
+}
+
+function looksLikeHtml(value) {
+  return /<\/?[a-z][^>]*>/i.test(value);
+}
+
+function htmlAttributeValues(html, name) {
+  const values = [];
+  const pattern = new RegExp("\\b" + name + "\\s*=\\s*([\"'])([\\s\\S]*?)\\1", "gi");
+  let match;
+  while ((match = pattern.exec(html))) values.push(match[2]);
+  return values;
+}
+
+function htmlVisibleText(html) {
+  return normalizedText(
+    html
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+  );
+}
+
+function plainTextCoversHtml(plain, html) {
+  const plainNorm = normalizedText(plain);
+  const visible = htmlVisibleText(html);
+  if (visible && plainNorm.indexOf(visible) === -1) return false;
+  const extras = htmlAttributeValues(html, "href").concat(htmlAttributeValues(html, "src"));
+  for (const value of extras) {
+    if (plain.indexOf(value) === -1 && plainNorm.indexOf(normalizedText(value)) === -1) return false;
+  }
+  return true;
+}
+
+function chooseListingDescription(plain, html) {
+  if (typeof plain !== "string" && typeof html !== "string") return undefined;
+  if (typeof html !== "string") return plain;
+  if (typeof plain !== "string") return html;
+  if (plainTextCoversHtml(plain, html)) return plain;
+  return html;
+}
+
+// Reverb's listing resource sends the seller description as `description`.
+// When a response also includes a distinct plain-text field and an HTML field,
+// keep the plain text if it already contains the HTML's visible text and URLs.
+function listingDescription(item) {
+  if (!item || typeof item !== "object") return undefined;
+  const raw = item.description;
+
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return chooseListingDescription(
+      firstString(raw, ["plain_text", "plain", "text"]),
+      firstString(raw, ["html", "html_text"])
+    );
+  }
+
+  if (typeof raw !== "string") return undefined;
+
+  const explicitPlain = firstString(item, PLAIN_DESCRIPTION_KEYS);
+  const explicitHtml = firstString(item, HTML_DESCRIPTION_KEYS);
+  if (explicitPlain === undefined && explicitHtml === undefined) return raw;
+
+  const rawIsHtml = looksLikeHtml(raw);
+  const htmlCandidates = [];
+  if (rawIsHtml) htmlCandidates.push(raw);
+  if (explicitHtml !== undefined && htmlCandidates.indexOf(explicitHtml) === -1) htmlCandidates.push(explicitHtml);
+  if (htmlCandidates.length === 0) return raw;
+
+  const plainCandidates = [];
+  if (!rawIsHtml) plainCandidates.push(raw);
+  if (explicitPlain !== undefined && plainCandidates.indexOf(explicitPlain) === -1) plainCandidates.push(explicitPlain);
+
+  const coversAllHtml = (plain) => htmlCandidates.every((html) => plainTextCoversHtml(plain, html));
+  if (plainCandidates.indexOf(raw) !== -1 && coversAllHtml(raw)) return raw;
+  for (const candidate of plainCandidates) {
+    if (coversAllHtml(candidate)) return candidate;
+  }
+
+  let chosen = htmlCandidates[0];
+  for (const candidate of htmlCandidates) {
+    const chosenCovers = plainTextCoversHtml(htmlVisibleText(chosen), candidate);
+    const candidateCovers = plainTextCoversHtml(htmlVisibleText(candidate), chosen);
+    if (candidateCovers && !chosenCovers) chosen = candidate;
+  }
+  return chosen;
+}
+
+function isListingResource(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  if (body.id !== undefined) return true;
+  if (typeof body.title === "string") return true;
+  if (typeof body.make === "string" || typeof body.model === "string") return true;
+  if (typeof body.description === "string") return true;
+  if (body.description && typeof body.description === "object") return true;
+  const links = body._links;
+  if (links && typeof links === "object" && (links.self || links.web)) return true;
+  return false;
+}
+
 function toListing(item) {
   if (!item || typeof item !== "object") return {};
   const links = item._links && typeof item._links === "object" ? item._links : {};
@@ -449,6 +571,8 @@ function toListing(item) {
   if (item.finish !== undefined) listing.finish = item.finish;
   if (item.year !== undefined) listing.year = item.year;
   if (item.sku !== undefined) listing.sku = item.sku;
+  const description = listingDescription(item);
+  if (description !== undefined) listing.description = description;
   const price = pick(item.price, ["amount", "currency", "display"]);
   if (price) listing.price = price;
   const condition = pick(item.condition, ["display_name", "slug"]);
@@ -566,6 +690,7 @@ async function updateListing(args) {
     contentType: "application/hal+json",
     body: payload,
   });
+  if (!isListingResource(body)) return getMyListing({ id });
   return toListing(body);
 }
 
@@ -828,8 +953,21 @@ function drain() {
     });
 }
 
-process.stdin.on("data", (chunk) => {
-  buffer = Buffer.concat([buffer, chunk]);
-  enqueue();
-});
-process.stdin.resume();
+if (require.main === module) {
+  process.stdin.on("data", (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    enqueue();
+  });
+  process.stdin.resume();
+}
+
+module.exports = {
+  toListing,
+  collectionResult,
+  isListingResource,
+  updateListing,
+  createListing,
+  getListing,
+  getMyListing,
+  listMyListings,
+};

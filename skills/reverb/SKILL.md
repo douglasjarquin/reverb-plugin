@@ -27,5 +27,6 @@ Configure `REVERB_TOKEN` in Cursor Plugins → Configure (scopes: `public`, `rea
 ## Rules
 
 - Never invent listing data. Report only tool results.
+- A returned listing includes `description` when Reverb sends one: the full description text. If Reverb sends both plain text and HTML, `description` is the plain text when that plain text already contains the HTML's content; otherwise it is the HTML.
 - A listing `url` is the HAL `web` link when present, else `self`.
 - Do not use this plugin for orders, payouts, or shipping fulfillment.
