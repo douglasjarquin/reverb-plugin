@@ -18,3 +18,5 @@ Do not commit tokens. The plugin only declares the variable name; `mcp.json` use
 - Seller (token required): `list_my_listings`, `get_my_listing`, `create_listing`, `update_listing`, `publish_listing`, `end_listing`, `get_shop`
 
 `create_listing` defaults to a draft unless you pass `publish`. Ask before publish or end.
+
+A returned listing includes `description` when Reverb sends one: the listing description text, not a summary.
